@@ -915,21 +915,15 @@ impl Discord {
 	}
 
 	/// Reorder roles on a server.
-	//  BROKEN: the trait `std::convert::From<&serde_json::Value>` is not implemented for `hyper::client::Body<'_>`
-	// pub fn reorder_roles(&self, server: ServerId, roles: &[(RoleId, usize)]) -> Result<Vec<Role>> {
-	// 	let mut body = ArrayBuilder::new();
-	// 	for &(role_id, position) in roles {
-	// 		body = body.push_object(|ob| {
-	// 			ob.insert("id", role_id.0);
-	// 			ob.insert("position", position);
-	// 			ob
-	// 		});
-	// 	}
-	// 	let body = body.build();
-
-	// 	let response = request!(self, patch(body), "/guilds/{}/roles", server);
-	// 	decode_array(try!(serde_json::from_reader(response)), Role::decode)
-	// }
+	pub fn reorder_roles(&self, server: ServerId, roles: &[(RoleId, usize)]) -> Result<Vec<Role>> {
+        let mut body = ArrayBuilder::new();
+        for &(role_id, position) in roles {
+            body = body.push_object(|ob| ob.insert("id", role_id.0).insert("position", position));
+        }
+        let body = try!(serde_json::to_string(&body.build()));
+        let response = request!(self, patch(body), "/guilds/{}/roles", server);
+        decode_array(try!(serde_json::from_reader(response)), Role::decode)
+    }
 
 	/// Create a private channel with the given user, or return the existing
 	/// one if it exists.
