@@ -6,7 +6,6 @@ use websocket::client::{Client, Sender, Receiver};
 use websocket::stream::WebSocketStream;
 
 use serde_json;
-use serde_json::builder::ObjectBuilder;
 
 use model::*;
 use internal::Status;
@@ -54,7 +53,10 @@ impl Connection {
 	/// Usually called internally by `Discord::connect`, which provides both
 	/// the token and URL and an optional user-given shard ID and total shard
 	/// count.
-	pub fn new(base_url: &str, token: &str, shard_info: Option<[u8; 2]>) -> Result<(Connection, ReadyEvent)> {
+	pub fn new(base_url: &str,
+	           token: &str,
+	           shard_info: Option<[u8; 2]>)
+	           -> Result<(Connection, ReadyEvent)> {
 		debug!("Gateway: {}", base_url);
 		// establish the websocket connection
 		let url = try!(build_gateway_url(base_url));
@@ -72,14 +74,14 @@ impl Connection {
 			GatewayEvent::Hello(interval) => heartbeat_interval = interval,
 			other => {
 				debug!("Unexpected event: {:?}", other);
-				return Err(Error::Protocol("Expected Hello during handshake"))
+				return Err(Error::Protocol("Expected Hello during handshake"));
 			}
 		}
 
 		let (tx, rx) = mpsc::channel();
 		try!(::std::thread::Builder::new()
-			.name("Discord Keepalive".into())
-			.spawn(move || keepalive(heartbeat_interval, sender, rx)));
+		         .name("Discord Keepalive".into())
+		         .spawn(move || keepalive(heartbeat_interval, sender, rx)));
 
 		// read the Ready event
 		let sequence;
@@ -88,7 +90,7 @@ impl Connection {
 			GatewayEvent::Dispatch(seq, Event::Ready(event)) => {
 				sequence = seq;
 				ready = event;
-			},
+			}
 			GatewayEvent::InvalidateSession => {
 				debug!("Session invalidated, reidentifying");
 				let _ = tx.send(Status::SendMessage(identify));
@@ -97,19 +99,25 @@ impl Connection {
 						sequence = seq;
 						ready = event;
 					}
+					GatewayEvent::InvalidateSession => {
+						return Err(Error::Protocol("Invalid session during handshake. \
+							Double-check your token or consider waiting 5 seconds between starting shards."))
+					}
 					other => {
 						debug!("Unexpected event: {:?}", other);
-						return Err(Error::Protocol("Expected Ready during handshake"))
+						return Err(Error::Protocol("Expected Ready during handshake"));
 					}
 				}
 			}
 			other => {
 				debug!("Unexpected event: {:?}", other);
-				return Err(Error::Protocol("Expected Ready or InvalidateSession during handshake"))
+				return Err(Error::Protocol("Expected Ready or InvalidateSession during handshake"));
 			}
 		}
 		if ready.version != GATEWAY_VERSION {
-			warn!("Got protocol version {} instead of {}", ready.version, GATEWAY_VERSION);
+			warn!("Got protocol version {} instead of {}",
+			      ready.version,
+			      GATEWAY_VERSION);
 		}
 		let session_id = ready.session_id.clone();
 
@@ -125,7 +133,8 @@ impl Connection {
 			// voice only
 			user_id: ready.user.id,
 			voice_handles: HashMap::new(),
-		), ready))
+		),
+		    ready))
 	}
 
 	/// Change the game information that this client reports as playing.
@@ -148,18 +157,19 @@ impl Connection {
 			OnlineStatus::Offline => OnlineStatus::Invisible,
 			other => other,
 		};
-		let msg = ObjectBuilder::new()
-			.insert("op", 3)
-			.insert_object("d", move |mut object| {
-				object = object.insert("afk", afk)
-					.insert("since", 0)
-					.insert("status", status.name());
-				match game {
-					Some(game) => object.insert_object("game", move |o| o.insert("name", game.name)),
-					None => object.insert("game", serde_json::Value::Null),
-				}
-			})
-			.build();
+		let game = match game {
+			Some(game) => json! {{ "name": game.name }},
+			None => json!(null),
+		};
+		let msg = json! {{
+			"op": 3,
+			"d": {
+				"afk": afk,
+				"since": 0,
+				"status": status,
+				"game": game,
+			}
+		}};
 		let _ = self.keepalive_channel.send(Status::SendMessage(msg));
 	}
 
@@ -169,9 +179,13 @@ impl Connection {
 	#[cfg(feature="voice")]
 	pub fn voice(&mut self, server_id: Option<ServerId>) -> &mut VoiceConnection {
 		let Connection { ref mut voice_handles, user_id, ref keepalive_channel, .. } = *self;
-		voice_handles.entry(server_id).or_insert_with(||
-			VoiceConnection::__new(server_id, user_id, keepalive_channel.clone())
-		)
+		voice_handles
+			.entry(server_id)
+			.or_insert_with(|| {
+				                VoiceConnection::__new(server_id,
+				                                       user_id,
+				                                       keepalive_channel.clone())
+				               })
 	}
 
 	/// Drop the voice connection for a server, forgetting all settings.
@@ -222,11 +236,16 @@ impl Connection {
 				Ok(GatewayEvent::Dispatch(sequence, event)) => {
 					self.last_sequence = sequence;
 					let _ = self.keepalive_channel.send(Status::Sequence(sequence));
-					#[cfg(feature="voice")] {
+#[cfg(feature="voice")]					{
 						if let Event::VoiceStateUpdate(server_id, ref voice_state) = event {
 							self.voice(server_id).__update_state(voice_state);
 						}
-						if let Event::VoiceServerUpdate { server_id, channel_id: _, ref endpoint, ref token } = event {
+						if let Event::VoiceServerUpdate {
+						           server_id,
+						           channel_id: _,
+						           ref endpoint,
+						           ref token,
+						       } = event {
 							self.voice(server_id).__update_server(endpoint, token);
 						}
 					}
@@ -234,21 +253,21 @@ impl Connection {
 				}
 				Ok(GatewayEvent::Heartbeat(sequence)) => {
 					debug!("Heartbeat received with seq {}", sequence);
-					let map = ObjectBuilder::new()
-						.insert("op", 1)
-						.insert("d", sequence)
-						.build();
+					let map = json! {{
+						"op": 1,
+						"d": sequence,
+					}};
 					let _ = self.keepalive_channel.send(Status::SendMessage(map));
 				}
-				Ok(GatewayEvent::HeartbeatAck) => {
-				}
+				Ok(GatewayEvent::HeartbeatAck) => {}
 				Ok(GatewayEvent::Reconnect) => {
 					return self.reconnect().map(Event::Ready);
 				}
 				Ok(GatewayEvent::InvalidateSession) => {
 					debug!("Session invalidated, reidentifying");
 					self.session_id = None;
-					let _ = self.keepalive_channel.send(Status::SendMessage(identify(&self.token, self.shard_info)));
+					let _ = self.keepalive_channel
+						.send(Status::SendMessage(identify(&self.token, self.shard_info)));
 				}
 			}
 		}
@@ -263,7 +282,7 @@ impl Connection {
 			if let Ok((conn, ready)) = Connection::new(&self.ws_url, &self.token, self.shard_info) {
 				::std::mem::replace(self, conn).raw_shutdown();
 				self.session_id = Some(ready.session_id.clone());
-				return Ok(ready)
+				return Ok(ready);
 			}
 			::sleep_ms(1000);
 		}
@@ -279,21 +298,24 @@ impl Connection {
 		::sleep_ms(1000);
 		debug!("Resuming...");
 		// close connection and re-establish
-		try!(self.receiver.get_mut().get_mut().shutdown(::std::net::Shutdown::Both));
+		try!(self.receiver
+		         .get_mut()
+		         .get_mut()
+		         .shutdown(::std::net::Shutdown::Both));
 		let url = try!(build_gateway_url(&self.ws_url));
 		let response = try!(try!(Client::connect(url)).send());
 		try!(response.validate());
 		let (mut sender, mut receiver) = response.begin().split();
 
 		// send the resume request
-		let resume = ObjectBuilder::new()
-			.insert("op", 6)
-			.insert_object("d", |o| o
-				.insert("seq", self.last_sequence)
-				.insert("token", &self.token)
-				.insert("session_id", session_id)
-			)
-			.build();
+		let resume = json! {{
+			"op": 6,
+			"d": {
+				"seq": self.last_sequence,
+				"token": self.token,
+				"session_id": session_id,
+			}
+		}};
 		try!(sender.send_json(&resume));
 
 		// TODO: when Discord has implemented it, observe the RESUMING event here
@@ -301,7 +323,8 @@ impl Connection {
 		loop {
 			match try!(receiver.recv_json(GatewayEvent::decode)) {
 				GatewayEvent::Hello(interval) => {
-					let _ = self.keepalive_channel.send(Status::ChangeInterval(interval));
+					let _ = self.keepalive_channel
+						.send(Status::ChangeInterval(interval));
 				}
 				GatewayEvent::Dispatch(seq, event) => {
 					if let Event::Resumed { .. } = event {
@@ -312,15 +335,15 @@ impl Connection {
 					}
 					self.last_sequence = seq;
 					first_event = event;
-					break
-				},
+					break;
+				}
 				GatewayEvent::InvalidateSession => {
 					debug!("Session invalidated in resume, reidentifying");
 					try!(sender.send_json(&identify(&self.token, self.shard_info)));
 				}
 				other => {
 					debug!("Unexpected event: {:?}", other);
-					return Err(Error::Protocol("Unexpected event during resume"))
+					return Err(Error::Protocol("Unexpected event during resume"));
 				}
 			}
 		}
@@ -333,36 +356,34 @@ impl Connection {
 
 	/// Cleanly shut down the websocket connection. Optional.
 	pub fn shutdown(mut self) -> Result<()> {
-		use websocket::{Sender as S};
+		try!(self.inner_shutdown());
+		::std::mem::forget(self); // don't call a second time
+		Ok(())
+	}
+
+	// called from shutdown() and drop()
+	fn inner_shutdown(&mut self) -> Result<()> {
+		use websocket::Sender as S;
 		use std::io::Write;
 
 		// Hacky horror: get the WebSocketStream from the Receiver and formally close it
 		let stream = self.receiver.get_mut().get_mut();
 		try!(Sender::new(stream.by_ref(), true)
-			.send_message(&::websocket::message::Message::close_because(1000, "")));
+		         .send_message(&::websocket::message::Message::close_because(1000, "")));
 		try!(stream.flush());
 		try!(stream.shutdown(::std::net::Shutdown::Both));
 		Ok(())
 	}
 
+	// called when we want to drop the connection with no fanfare
 	fn raw_shutdown(mut self) {
 		use std::io::Write;
-		let stream = self.receiver.get_mut().get_mut();
-		let _ = stream.flush();
-		let _ = stream.shutdown(::std::net::Shutdown::Both);
-	}
-
-	#[doc(hidden)]
-	pub fn __download_members(&self, servers: &[ServerId]) {
-		let msg = ObjectBuilder::new()
-			.insert("op", 8)
-			.insert_object("d", |o| o
-				.insert_array("guild_id", |a| servers.iter().fold(a, |a, s| a.push(s.0)))
-				.insert("query", "")
-				.insert("limit", 0)
-			)
-			.build();
-		let _ = self.keepalive_channel.send(Status::SendMessage(msg));
+		{
+			let stream = self.receiver.get_mut().get_mut();
+			let _ = stream.flush();
+			let _ = stream.shutdown(::std::net::Shutdown::Both);
+		}
+		::std::mem::forget(self); // don't call inner_shutdown()
 	}
 
 	/// Requests a download of online member lists.
@@ -373,10 +394,10 @@ impl Connection {
 	///
 	/// Can be used with `State::all_servers`.
 	pub fn sync_servers(&self, servers: &[ServerId]) {
-		let msg = ObjectBuilder::new()
-			.insert("op", 12)
-			.insert_array("d", |a| servers.iter().fold(a, |a, s| a.push(s.0)))
-			.build();
+		let msg = json! {{
+			"op": 12,
+			"d": servers,
+		}};
 		let _ = self.keepalive_channel.send(Status::SendMessage(msg));
 	}
 
@@ -385,12 +406,10 @@ impl Connection {
 	/// Can be used with `State::all_private_channels`.
 	pub fn sync_calls(&self, channels: &[ChannelId]) {
 		for &channel in channels {
-			let msg = ObjectBuilder::new()
-				.insert("op", 13)
-				.insert_object("d", |o| o
-					.insert("channel_id", channel.0)
-				)
-				.build();
+			let msg = json! {{
+				"op": 13,
+				"d": { "channel_id": channel }
+			}};
 			let _ = self.keepalive_channel.send(Status::SendMessage(msg));
 		}
 	}
@@ -400,44 +419,50 @@ impl Connection {
 	/// The members lists are cleared on call, and then refilled as chunks are received. When
 	/// `unknown_members()` returns 0, the download has completed.
 	pub fn download_all_members(&mut self, state: &mut ::State) {
-		if state.unknown_members() == 0 { return }
+		if state.unknown_members() == 0 {
+			return;
+		}
 		let servers = state.__download_members();
-		let msg = ObjectBuilder::new()
-			.insert("op", 8)
-			.insert_object("d", |o| o
-				.insert_array("guild_id", |a| servers.iter().fold(a, |a, s| a.push(s.0)))
-				.insert("query", "")
-				.insert("limit", 0)
-			)
-			.build();
+		let msg = json! {{
+			"op": 8,
+			"d": {
+				"guild_id": servers,
+				"query": "",
+				"limit": 0,
+			}
+		}};
 		let _ = self.keepalive_channel.send(Status::SendMessage(msg));
 	}
 }
 
+impl Drop for Connection {
+	fn drop(&mut self) {
+		// Swallow errors
+		let _ = self.inner_shutdown();
+	}
+}
+
 fn identify(token: &str, shard_info: Option<[u8; 2]>) -> serde_json::Value {
-	ObjectBuilder::new()
-		.insert("op", 2)
-		.insert_object("d", |mut object| {
-			object = object
-				.insert("token", token)
-				.insert_object("properties", |object| object
-					.insert("$os", ::std::env::consts::OS)
-					.insert("$browser", "Discord library for Rust")
-					.insert("$device", "discord-rs")
-					.insert("$referring_domain", "")
-					.insert("$referrer", "")
-				)
-				.insert("large_threshold", 250)
-				.insert("compress", true)
-				.insert("v", GATEWAY_VERSION);
-
-			if let Some(shard_info) = shard_info {
-				object = object.insert_array("shard", |array| array.push(shard_info[0]).push(shard_info[1]));
-			}
-
-			object
-		})
-		.build()
+	let mut result = json! {{
+		"op": 2,
+		"d": {
+			"token": token,
+			"properties": {
+				"$os": ::std::env::consts::OS,
+				"$browser": "Discord library for Rust",
+				"$device": "discord-rs",
+				"$referring_domain": "",
+				"$referrer": "",
+			},
+			"large_threshold": 250,
+			"compress": true,
+			"v": GATEWAY_VERSION,
+		}
+	}};
+	if let Some(info) = shard_info {
+		result["shard"] = json![[info[0], info[1]]];
+	}
+	result
 }
 
 #[inline]
@@ -457,16 +482,16 @@ fn keepalive(interval: u64, mut sender: Sender<WebSocketStream>, channel: mpsc::
 			match channel.try_recv() {
 				Ok(Status::SendMessage(val)) => {
 					match sender.send_json(&val) {
-						Ok(()) => {},
-						Err(e) => warn!("Error sending gateway message: {:?}", e)
+						Ok(()) => {}
+						Err(e) => warn!("Error sending gateway message: {:?}", e),
 					}
-				},
+				}
 				Ok(Status::Sequence(seq)) => {
 					last_sequence = seq;
-				},
+				}
 				Ok(Status::ChangeInterval(interval)) => {
 					timer = ::Timer::new(interval);
-				},
+				}
 				Ok(Status::ChangeSender(new_sender)) => {
 					sender = new_sender;
 				}
@@ -476,13 +501,13 @@ fn keepalive(interval: u64, mut sender: Sender<WebSocketStream>, channel: mpsc::
 		}
 
 		if timer.check_tick() {
-			let map = ObjectBuilder::new()
-				.insert("op", 1)
-				.insert("d", last_sequence)
-				.build();
+			let map = json! {{
+				"op": 1,
+				"d": last_sequence
+			}};
 			match sender.send_json(&map) {
-				Ok(()) => {},
-				Err(e) => warn!("Error sending gateway keeaplive: {:?}", e)
+				Ok(()) => {}
+				Err(e) => warn!("Error sending gateway keeaplive: {:?}", e),
 			}
 		}
 	}

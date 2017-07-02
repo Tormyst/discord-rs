@@ -11,7 +11,6 @@ use std::net::UdpSocket;
 use byteorder::{LittleEndian, BigEndian, WriteBytesExt, ReadBytesExt};
 use opus;
 use serde_json;
-use serde_json::builder::ObjectBuilder;
 use sodiumoxide::crypto::secretbox as crypto;
 use websocket::client::{Client, Sender};
 use websocket::stream::WebSocketStream;
@@ -75,12 +74,20 @@ pub trait AudioReceiver: Send {
 	/// 960 per 20ms frame). If `stereo` is true, the length of the `data` slice is doubled and
 	/// samples have been interleaved. The typical length of `data` is 960 or 1920 for a 20ms frame,
 	/// but may be larger or smaller in some situations.
-	fn voice_packet(&mut self, ssrc: u32, sequence: u16, timestamp: u32, stereo: bool, data: &[i16]);
+	fn voice_packet(&mut self,
+	                ssrc: u32,
+	                sequence: u16,
+	                timestamp: u32,
+	                stereo: bool,
+	                data: &[i16]);
 }
 
 impl VoiceConnection {
 	#[doc(hidden)]
-	pub fn __new(server_id: Option<ServerId>, user_id: UserId, main_ws: mpsc::Sender<::internal::Status>) -> Self {
+	pub fn __new(server_id: Option<ServerId>,
+	             user_id: UserId,
+	             main_ws: mpsc::Sender<::internal::Status>)
+	             -> Self {
 		let (tx, rx) = mpsc::channel();
 		start_voice_thread(server_id, rx);
 		VoiceConnection {
@@ -118,14 +125,18 @@ impl VoiceConnection {
 	#[inline]
 	pub fn set_mute(&mut self, mute: bool) {
 		self.mute = mute;
-		if self.channel_id.is_some() { self.send_connect() }
+		if self.channel_id.is_some() {
+			self.send_connect()
+		}
 	}
 
 	/// Set the deaf status of the voice connection. Does not affect mute status.
 	#[inline]
 	pub fn set_deaf(&mut self, deaf: bool) {
 		self.deaf = deaf;
-		if self.channel_id.is_some() { self.send_connect() }
+		if self.channel_id.is_some() {
+			self.send_connect()
+		}
 	}
 
 	/// Get the current channel of this voice connection, if any.
@@ -136,16 +147,16 @@ impl VoiceConnection {
 
 	/// Send the connect/disconnect command over the main websocket
 	fn send_connect(&self) {
-		let _ = self.main_ws.send(::internal::Status::SendMessage(ObjectBuilder::new()
-			.insert("op", 4)
-			.insert_object("d", |object| object
-				.insert("guild_id", self.server_id.map(|s| s.0))
-				.insert("channel_id", self.channel_id.map(|c| c.0))
-				.insert("self_mute", self.mute)
-				.insert("self_deaf", self.deaf)
-			)
-			.build()
-		));
+		let _ = self.main_ws
+			.send(::internal::Status::SendMessage(json! {{
+			"op": 4,
+			"d": {
+				"guild_id": self.server_id,
+				"channel_id": self.channel_id,
+				"self_mute": self.mute,
+				"self_deaf": self.deaf,
+			}
+		}}));
 	}
 
 	#[doc(hidden)]
@@ -228,19 +239,20 @@ impl VoiceConnection {
 	fn internal_connect(&mut self, session_id: String, endpoint: String, token: String) {
 		let user_id = self.user_id;
 		let server_id = match (&self.server_id, &self.channel_id) {
-			(&Some(ServerId(id)), _) | (&None, &Some(ChannelId(id))) => id,
+			(&Some(ServerId(id)), _) |
+			(&None, &Some(ChannelId(id))) => id,
 			_ => {
 				error!("no server_id or channel_id in internal_connect");
 				return;
 			}
 		};
 		self.thread_send(Status::Connect(ConnStartInfo {
-			server_id: server_id,
-			user_id: user_id,
-			session_id: session_id,
-			endpoint: endpoint,
-			token: token,
-		}));
+		                                     server_id: server_id,
+		                                     user_id: user_id,
+		                                     session_id: session_id,
+		                                     endpoint: endpoint,
+		                                     token: token,
+		                                 }));
 	}
 }
 
@@ -261,13 +273,15 @@ pub fn create_pcm_source<R: Read + Send + 'static>(stereo: bool, read: R) -> Box
 struct PcmSource<R: Read + Send>(bool, R);
 
 impl<R: Read + Send> AudioSource for PcmSource<R> {
-	fn is_stereo(&mut self) -> bool { self.0 }
+	fn is_stereo(&mut self) -> bool {
+		self.0
+	}
 	fn read_frame(&mut self, buffer: &mut [i16]) -> Option<usize> {
 		for (i, val) in buffer.iter_mut().enumerate() {
 			*val = match self.1.read_i16::<LittleEndian>() {
 				Ok(val) => val,
 				Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => return Some(i),
-				Err(_) => return None
+				Err(_) => return None,
 			}
 		}
 		Some(buffer.len())
@@ -283,35 +297,44 @@ pub fn open_ffmpeg_stream<P: AsRef<::std::ffi::OsStr>>(path: P) -> Result<Box<Au
 	let path = path.as_ref();
 	let stereo = check_stereo(path).unwrap_or(false);
 	let child = try!(Command::new("ffmpeg")
-		.arg("-i").arg(path)
-		.args(&[
-			"-f", "s16le",
-			"-ac", if stereo { "2" } else { "1" },
-			"-ar", "48000",
-			"-acodec", "pcm_s16le",
-			"-"])
-		.stdin(Stdio::null())
-		.stdout(Stdio::piped())
-		.stderr(Stdio::null())
-		.spawn());
+	                     .arg("-i")
+	                     .arg(path)
+	                     .args(&["-f",
+	                             "s16le",
+	                             "-ac",
+	                             if stereo { "2" } else { "1" },
+	                             "-ar",
+	                             "48000",
+	                             "-acodec",
+	                             "pcm_s16le",
+	                             "-"])
+	                     .stdin(Stdio::null())
+	                     .stdout(Stdio::piped())
+	                     .stderr(Stdio::null())
+	                     .spawn());
 	Ok(create_pcm_source(stereo, ProcessStream(child)))
 }
 
 fn check_stereo(path: &::std::ffi::OsStr) -> Result<bool> {
 	use std::process::{Command, Stdio};
 	let output = try!(Command::new("ffprobe")
-		.args(&["-v", "quiet", "-of", "json", "-show_streams", "-i"])
-		.arg(path)
-		.stdin(Stdio::null())
-		.output());
+	                      .args(&["-v", "quiet", "-of", "json", "-show_streams", "-i"])
+	                      .arg(path)
+	                      .stdin(Stdio::null())
+	                      .output());
 	let json: serde_json::Value = try!(serde_json::from_reader(&output.stdout[..]));
 	let streams = try!(json.as_object()
-		.and_then(|m| m.get("streams"))
-		.and_then(|v| v.as_array())
-		.ok_or(Error::Other("")));
-	Ok(streams.iter().any(|stream|
-		stream.as_object().and_then(|m| m.get("channels").and_then(|v| v.as_i64())) == Some(2)
-	))
+	                       .and_then(|m| m.get("streams"))
+	                       .and_then(|v| v.as_array())
+	                       .ok_or(Error::Other("")));
+	Ok(streams
+	       .iter()
+	       .any(|stream| {
+		            stream
+		                .as_object()
+		                .and_then(|m| m.get("channels").and_then(|v| v.as_i64())) ==
+		            Some(2)
+		           }))
 }
 
 /// A stream that reads from a child's stdout and kills it on drop.
@@ -327,6 +350,8 @@ impl Drop for ProcessStream {
 	fn drop(&mut self) {
 		// If we can't kill it, it's dead already or out of our hands
 		let _ = self.0.kill();
+		// To avoid zombie processes, we must also wait on it
+		let _ = self.0.wait();
 	}
 }
 
@@ -340,13 +365,14 @@ impl Drop for ProcessStream {
 pub fn open_ytdl_stream(url: &str) -> Result<Box<AudioSource>> {
 	use std::process::{Command, Stdio};
 	let output = try!(Command::new("youtube-dl")
-		.args(&[
-			"-f", "webm[abr>0]/bestaudio/best",
-			"--no-playlist", "--print-json",
-			"--skip-download",
-			url])
-		.stdin(Stdio::null())
-		.output());
+	                      .args(&["-f",
+	                              "webm[abr>0]/bestaudio/best",
+	                              "--no-playlist",
+	                              "--print-json",
+	                              "--skip-download",
+	                              url])
+	                      .stdin(Stdio::null())
+	                      .output());
 	if !output.status.success() {
 		return Err(Error::Command("youtube-dl", output));
 	}
@@ -354,11 +380,11 @@ pub fn open_ytdl_stream(url: &str) -> Result<Box<AudioSource>> {
 	let json: serde_json::Value = try!(serde_json::from_reader(&output.stdout[..]));
 	let map = match json.as_object() {
 		Some(map) => map,
-		None => return Err(Error::Other("youtube-dl output could not be read"))
+		None => return Err(Error::Other("youtube-dl output could not be read")),
 	};
 	let url = match map.get("url").and_then(serde_json::Value::as_str) {
 		Some(url) => url,
-		None => return Err(Error::Other("youtube-dl output's \"url\" could not be read"))
+		None => return Err(Error::Other("youtube-dl output's \"url\" could not be read")),
 	};
 	open_ffmpeg_stream(url)
 }
@@ -395,10 +421,10 @@ fn voice_thread(channel: mpsc::Receiver<Status>) {
 				Ok(Status::SetSource(s)) => audio_source = s,
 				Ok(Status::SetReceiver(r)) => receiver = r,
 				Ok(Status::Connect(info)) => {
-					connection = InternalConnection::new(info).map_err(
-						|e| error!("Error connecting to voice: {:?}", e)
-					).ok();
-				},
+					connection = InternalConnection::new(info)
+						.map_err(|e| error!("Error connecting to voice: {:?}", e))
+						.ok();
+				}
 				Ok(Status::Disconnect) => connection = None,
 				Err(mpsc::TryRecvError::Empty) => break,
 				Err(mpsc::TryRecvError::Disconnected) => break 'outer,
@@ -465,22 +491,22 @@ impl InternalConnection {
 		// establish the websocket connection
 		let url = match ::websocket::client::request::Url::parse(&format!("wss://{}", endpoint)) {
 			Ok(url) => url,
-			Err(_) => return Err(Error::Other("Invalid endpoint URL"))
+			Err(_) => return Err(Error::Other("Invalid endpoint URL")),
 		};
 		let response = try!(try!(Client::connect(url)).send());
 		try!(response.validate());
 		let (mut sender, mut receiver) = response.begin().split();
 
 		// send the handshake
-		let map = ObjectBuilder::new()
-			.insert("op", 0)
-			.insert_object("d", |object| object
-				.insert("server_id", server_id)
-				.insert("user_id", user_id.0)
-				.insert("session_id", session_id)
-				.insert("token", token)
-			)
-			.build();
+		let map = json! {{
+			"op": 0,
+			"d": {
+				"server_id": server_id,
+				"user_id": user_id,
+				"session_id": session_id,
+				"token": token,
+			}
+		}};
 		try!(sender.send_json(&map));
 
 		let stuff;
@@ -490,7 +516,13 @@ impl InternalConnection {
 					// TODO: handle this by beginning to heartbeat at the
 					// supplied interval
 				}
-				VoiceEvent::Handshake { heartbeat_interval, port, ssrc, modes, ip } => {
+				VoiceEvent::Handshake {
+					heartbeat_interval,
+					port,
+					ssrc,
+					modes,
+					ip,
+				} => {
 					stuff = (heartbeat_interval, port, ssrc, modes, ip);
 					break;
 				}
@@ -502,15 +534,16 @@ impl InternalConnection {
 		}
 		let (interval, port, ssrc, modes, ip) = stuff;
 		if !modes.iter().any(|s| s == "xsalsa20_poly1305") {
-			return Err(Error::Protocol("Voice mode \"xsalsa20_poly1305\" unavailable"))
+			return Err(Error::Protocol("Voice mode \"xsalsa20_poly1305\" unavailable"));
 		}
 
 		// bind a UDP socket and send the ssrc value in a packet as identification
 		let destination = {
 			use std::net::ToSocketAddrs;
-			try!(try!((ip.as_ref().map(|ip| &ip[..]).unwrap_or(&endpoint[..]), port).to_socket_addrs())
-				.next()
-				.ok_or(Error::Other("Failed to resolve voice hostname")))
+			try!(try!((ip.as_ref().map(|ip| &ip[..]).unwrap_or(&endpoint[..]), port)
+			              .to_socket_addrs())
+			             .next()
+			             .ok_or(Error::Other("Failed to resolve voice hostname")))
 		};
 		let udp = try!(UdpSocket::bind("0.0.0.0:0"));
 		{
@@ -530,17 +563,17 @@ impl InternalConnection {
 			let port_number = try!((&bytes[len - 2..]).read_u16::<LittleEndian>());
 
 			// send the acknowledgement websocket message
-			let map = ObjectBuilder::new()
-				.insert("op", 1)
-				.insert_object("d", |object| object
-					.insert("protocol", "udp")
-					.insert_object("data", |object| object
-						.insert("address", own_address)
-						.insert("port", port_number)
-						.insert("mode", "xsalsa20_poly1305")
-					)
-				)
-				.build();
+			let map = json! {{
+				"op": 1,
+				"d": {
+					"protocol": "udp",
+					"data": {
+						"address": own_address,
+						"port": port_number,
+						"mode": "xsalsa20_poly1305",
+					}
+				}
+			}};
 			try!(sender.send_json(&map));
 		}
 
@@ -549,14 +582,17 @@ impl InternalConnection {
 		loop {
 			match try!(receiver.recv_json(VoiceEvent::decode)) {
 				VoiceEvent::Ready { mode, secret_key } => {
-					encryption_key = crypto::Key::from_slice(&secret_key).expect("failed to create key");
+					encryption_key = crypto::Key::from_slice(&secret_key)
+						.expect("failed to create key");
 					if mode != "xsalsa20_poly1305" {
-						return Err(Error::Protocol("Voice mode in Ready was not \"xsalsa20_poly1305\""))
+						return Err(Error::Protocol("Voice mode in Ready was not \"xsalsa20_poly1305\"",),);
 					}
-					break
+					break;
 				}
-				VoiceEvent::Unknown(op, value) => debug!("Unknown message type: {}/{:?}", op, value),
-				_ => {},
+				VoiceEvent::Unknown(op, value) => {
+					debug!("Unknown message type: {}/{:?}", op, value)
+				}
+				_ => {}
 			}
 		}
 
@@ -568,56 +604,59 @@ impl InternalConnection {
 			let tx2 = tx1.clone();
 			let udp_clone = try!(udp.try_clone());
 			try!(::std::thread::Builder::new()
-				.name(format!("{} (WS reader)", thread_name))
-				.spawn(move || while let Ok(msg) = receiver.recv_json(VoiceEvent::decode) {
-					match tx1.send(RecvStatus::Websocket(msg)) {
-						Ok(()) => {},
-						Err(_) => return
-					}
-				}));
+			         .name(format!("{} (WS reader)", thread_name))
+			         .spawn(move || while let Ok(msg) = receiver
+			                          .recv_json(VoiceEvent::decode) {
+				                match tx1.send(RecvStatus::Websocket(msg)) {
+				                    Ok(()) => {}
+				                    Err(_) => return,
+				                }
+				               }));
 			try!(::std::thread::Builder::new()
-				.name(format!("{} (UDP reader)", thread_name))
-				.spawn(move || {
-					let mut buffer = [0; 512];
-					loop {
-						let (len, _) = udp_clone.recv_from(&mut buffer).unwrap();
-						match tx2.send(RecvStatus::Udp(buffer[..len].iter().cloned().collect())) {
-							Ok(()) => {},
-							Err(_) => return
-						}
+			         .name(format!("{} (UDP reader)", thread_name))
+			         .spawn(move || {
+				let mut buffer = [0; 512];
+				loop {
+					let (len, _) = udp_clone.recv_from(&mut buffer).unwrap();
+					match tx2.send(RecvStatus::Udp(buffer[..len].iter().cloned().collect())) {
+						Ok(()) => {}
+						Err(_) => return,
 					}
-				}));
+				}
+			}));
 			rx
 		};
 
 		info!("Voice connected to {} ({})", endpoint, destination);
 		Ok(InternalConnection {
-			sender: sender,
-			receive_chan: receive_chan,
-			encryption_key: encryption_key,
-			udp: udp,
-			destination: destination,
+		       sender: sender,
+		       receive_chan: receive_chan,
+		       encryption_key: encryption_key,
+		       udp: udp,
+		       destination: destination,
 
-			ssrc: ssrc,
-			sequence: 0,
-			timestamp: 0,
-			speaking: false,
-			silence_frames: 0,
+		       ssrc: ssrc,
+		       sequence: 0,
+		       timestamp: 0,
+		       speaking: false,
+		       silence_frames: 0,
 
-			decoder_map: HashMap::new(),
-			encoder: try!(opus::Encoder::new(SAMPLE_RATE, opus::Channels::Mono, opus::Application::Audio)),
-			encoder_stereo: false,
-			keepalive_timer: ::Timer::new(interval),
-			// after 5 minutes of us sending nothing, Discord will stop sending voice data to us
-			audio_keepalive_timer: ::Timer::new(4 * 60 * 1000),
-		})
+		       decoder_map: HashMap::new(),
+		       encoder: try!(opus::Encoder::new(SAMPLE_RATE,
+		                                        opus::Channels::Mono,
+		                                        opus::Application::Audio)),
+		       encoder_stereo: false,
+		       keepalive_timer: ::Timer::new(interval),
+		       // after 5 minutes of us sending nothing, Discord will stop sending voice data to us
+		       audio_keepalive_timer: ::Timer::new(4 * 60 * 1000),
+		   })
 	}
 
 	fn update(&mut self,
-		source: &mut Option<Box<AudioSource>>,
-		receiver: &mut Option<Box<AudioReceiver>>,
-		audio_timer: &mut ::Timer,
-	) -> Result<()> {
+	          source: &mut Option<Box<AudioSource>>,
+	          receiver: &mut Option<Box<AudioReceiver>>,
+	          audio_timer: &mut ::Timer)
+	          -> Result<()> {
 		let mut audio_buffer = [0i16; 960 * 2]; // 20 ms, stereo
 		let mut packet = [0u8; 512]; // 256 forces opus to reduce bitrate for some packets
 		let mut nonce = crypto::Nonce([0; 24]);
@@ -626,26 +665,44 @@ impl InternalConnection {
 		if let Some(receiver) = receiver.as_mut() {
 			while let Ok(status) = self.receive_chan.try_recv() {
 				match status {
-					RecvStatus::Websocket(VoiceEvent::SpeakingUpdate { user_id, ssrc, speaking }) => {
+					RecvStatus::Websocket(VoiceEvent::SpeakingUpdate {
+					                          user_id,
+					                          ssrc,
+					                          speaking,
+					                      }) => {
 						receiver.speaking_update(ssrc, user_id, speaking);
-					},
-					RecvStatus::Websocket(_) => {},
+					}
+					RecvStatus::Websocket(_) => {}
 					RecvStatus::Udp(packet) => {
 						let mut handle = &packet[2..];
 						let sequence = try!(handle.read_u16::<BigEndian>());
 						let timestamp = try!(handle.read_u32::<BigEndian>());
 						let ssrc = try!(handle.read_u32::<BigEndian>());
 						nonce.0[..HEADER_LEN].clone_from_slice(&packet[..HEADER_LEN]);
-						if let Ok(decrypted) = crypto::open(&packet[HEADER_LEN..], &nonce, &self.encryption_key) {
+						if let Ok(decrypted) = crypto::open(&packet[HEADER_LEN..],
+						                                    &nonce,
+						                                    &self.encryption_key) {
 							let channels = try!(opus::packet::get_nb_channels(&decrypted));
-							let len = try!(self.decoder_map.entry((ssrc, channels))
-								.or_insert_with(|| opus::Decoder::new(SAMPLE_RATE, channels).unwrap())
-								.decode(&decrypted, &mut audio_buffer, false));
+							let len = try!(self.decoder_map
+							                   .entry((ssrc, channels))
+							                   .or_insert_with(|| {
+								                                   opus::Decoder::new(SAMPLE_RATE,
+								                                                      channels)
+								                                           .unwrap()
+								                                  })
+							                   .decode(&decrypted, &mut audio_buffer, false));
 							let stereo = channels == opus::Channels::Stereo;
-							receiver.voice_packet(ssrc, sequence, timestamp,
-								stereo, &audio_buffer[..if stereo { len * 2 } else { len }]);
+							receiver.voice_packet(ssrc,
+							                      sequence,
+							                      timestamp,
+							                      stereo,
+							                      &audio_buffer[..if stereo {
+								                        len * 2
+								                       } else {
+								                        len
+								                       }]);
 						}
-					},
+					}
 				}
 			}
 		} else {
@@ -655,10 +712,10 @@ impl InternalConnection {
 
 		// Send the voice websocket keepalive if needed
 		if self.keepalive_timer.check_tick() {
-			let map = ObjectBuilder::new()
-				.insert("op", 3)
-				.insert("d", serde_json::Value::Null)
-				.build();
+			let map = json! {{
+				"op": 3,
+				"d": serde_json::Value::Null,
+			}};
 			try!(self.sender.send_json(&map));
 		}
 
@@ -674,14 +731,22 @@ impl InternalConnection {
 		let len = if let Some(source) = source.as_mut() {
 			let stereo = source.is_stereo();
 			if stereo != self.encoder_stereo {
-				let channels = if stereo { opus::Channels::Stereo } else { opus::Channels::Mono };
-				self.encoder = try!(opus::Encoder::new(SAMPLE_RATE, channels, opus::Application::Audio));
+				let channels = if stereo {
+					opus::Channels::Stereo
+				} else {
+					opus::Channels::Mono
+				};
+				self.encoder =
+					try!(opus::Encoder::new(SAMPLE_RATE, channels, opus::Application::Audio));
 				self.encoder_stereo = stereo;
 			}
 			let buffer_len = if stereo { 960 * 2 } else { 960 };
 			match source.read_frame(&mut audio_buffer[..buffer_len]) {
 				Some(len) => len,
-				None => { clear_source = true; 0 }
+				None => {
+					clear_source = true;
+					0
+				}
 			}
 		} else {
 			0
@@ -725,8 +790,12 @@ impl InternalConnection {
 		// encode the audio data
 		let extent = packet.len() - 16; // leave 16 bytes for encryption overhead
 		let buffer_len = if self.encoder_stereo { 960 * 2 } else { 960 };
-		let len = try!(self.encoder.encode(&audio_buffer[..buffer_len], &mut packet[HEADER_LEN..extent]));
-		let crypted = crypto::seal(&packet[HEADER_LEN..HEADER_LEN + len], &nonce, &self.encryption_key);
+		let len = try!(self.encoder
+		                   .encode(&audio_buffer[..buffer_len],
+		                           &mut packet[HEADER_LEN..extent]));
+		let crypted = crypto::seal(&packet[HEADER_LEN..HEADER_LEN + len],
+		                           &nonce,
+		                           &self.encryption_key);
 		packet[HEADER_LEN..HEADER_LEN + crypted.len()].clone_from_slice(&crypted);
 
 		self.sequence = self.sequence.wrapping_add(1);
@@ -734,23 +803,24 @@ impl InternalConnection {
 
 		// wait until the right time, then transmit the packet
 		audio_timer.sleep_until_tick();
-		try!(self.udp.send_to(&packet[..HEADER_LEN + crypted.len()], self.destination));
+		try!(self.udp
+		         .send_to(&packet[..HEADER_LEN + crypted.len()], self.destination));
 		self.audio_keepalive_timer.defer();
 		Ok(())
 	}
 
 	fn set_speaking(&mut self, speaking: bool) -> Result<()> {
 		if self.speaking == speaking {
-			return Ok(())
+			return Ok(());
 		}
 		self.speaking = speaking;
-		let map = ObjectBuilder::new()
-			.insert("op", 5)
-			.insert_object("d", |object| object
-				.insert("speaking", speaking)
-				.insert("delay", 0)
-			)
-			.build();
+		let map = json! {{
+			"op": 5,
+			"d": {
+				"speaking": speaking,
+				"delay": 0,
+			}
+		}};
 		self.sender.send_json(&map)
 	}
 }
