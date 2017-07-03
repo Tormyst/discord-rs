@@ -884,7 +884,7 @@ impl Discord {
 		Role::decode(try!(serde_json::from_reader(response)))
 	}
 	/// Reorder the roles on a server.
-    pub fn reorder_roles(&self, server: ServerId, roles: &[(RoleId, usize)]) -> Result<Vec<Role>> {
+	pub fn reorder_roles(&self, server: ServerId, roles: &[(RoleId, usize)]) -> Result<Vec<Role>> {
 		let map: serde_json::Value = roles.iter().map(|&(id, pos)|
 			json!{{
 				"id": id,
