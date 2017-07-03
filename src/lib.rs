@@ -860,10 +860,46 @@ impl Discord {
 		check_empty(request!(self, delete, "/guilds/{}/members/{}", server, user))
 	}
 
-	// Create role
-	// Edit role
-	// Reorder roles
-	// Delete roles
+	/// Create a new role on a server.
+	pub fn create_role(&self, server: ServerId, name: Option<&str>, permissions: Option<Permissions>,
+					   color: Option<u64>, hoist: Option<bool>, mentionable: Option<bool>)
+					   -> Result<Role> {
+		let map = json! {{
+			"name": name,
+			"permissions": permissions,
+			"color": color,
+			"hoist": hoist,
+			"mentionable": mentionable,
+		}};
+		let body = try!(serde_json::to_string(&map));
+		let response = request!(self, post(body), "/guilds/{}/roles", server);
+		Role::decode(try!(serde_json::from_reader(response)))
+	}
+
+	/// Modify a role on a server.
+	pub fn edit_role<F: FnOnce(EditRole) -> EditRole>(&self, server: ServerId, role: RoleId, f: F) -> Result<Role> {
+		let map = EditRole::__build(f);
+		let body = try!(serde_json::to_string(&map));
+		let response = request!(self, patch(body), "/guilds/{}/roles/{}", server, role);
+		Role::decode(try!(serde_json::from_reader(response)))
+	}
+	/// Reorder the roles on a server.
+    pub fn reorder_roles(&self, server: ServerId, roles: &[(RoleId, usize)]) -> Result<Vec<Role>> {
+		let map: serde_json::Value = roles.iter().map(|&(id, pos)|
+			json!{{
+				"id": id,
+					"position": pos
+			}}
+		).collect();
+		let body = try!(serde_json::to_string(&map));
+		let response = request!(self, patch(body), "/guilds/{}/roles", server);
+		decode_array(try!(serde_json::from_reader(response)), Role::decode)
+	}
+
+	/// Remove specified role from a server.
+	pub fn delete_role(&self, server: ServerId, role: RoleId) -> Result<()> {
+		check_empty(request!(self, delete, "/guilds/{}/roles/{}", server, role))
+	}
 
 	/// Create a private channel with the given user, or return the existing
 	/// one if it exists.
