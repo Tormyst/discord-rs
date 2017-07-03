@@ -243,6 +243,11 @@ impl EditRole {
 	pub fn hoist(self, hoist: bool) -> Self {
 		set!(self, "hoist", hoist)
 	}
+
+	/// Edit the role's mentionability, if the role can be mentioned.
+	pub fn mentionable(self, mentionable: bool) -> Self {
+		set!(self, "mentionable", mentionable)
+	}
 }
 
 impl EmbedBuilder {
